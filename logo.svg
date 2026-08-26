@@ -1,0 +1,37 @@
+<svg viewBox="0 0 240 240" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e1b2e"/>
+      <stop offset="100%" stop-color="#2d2440"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#a78bfa"/>
+      <stop offset="100%" stop-color="#f472b6"/>
+    </linearGradient>
+    <linearGradient id="accent2" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="100%" stop-color="#a78bfa"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="4" y="4" width="232" height="232" rx="28" fill="url(#bg)" stroke="#3d3454" stroke-width="2"/>
+
+  <!-- boot progress track -->
+  <rect x="36" y="176" width="168" height="10" rx="5" fill="#141020"/>
+  <rect x="36" y="176" width="104" height="10" rx="5" fill="url(#accent2)"/>
+
+  <!-- stacked "frames" motif: GIF slices turning into a GRUB boot screen -->
+  <g>
+    <rect x="52" y="56" width="70" height="88" rx="10" fill="#141020" stroke="#4b3f66" stroke-width="2" transform="rotate(-8 87 100)"/>
+    <rect x="66" y="52" width="70" height="88" rx="10" fill="#1b1730" stroke="#584a78" stroke-width="2" transform="rotate(-2 101 96)"/>
+    <rect x="80" y="50" width="72" height="90" rx="10" fill="#211c3a" stroke="url(#accent)" stroke-width="2.5"/>
+    <!-- play triangle = motion, frame corner mark = GIF -->
+    <polygon points="102,78 102,112 132,95" fill="url(#accent)"/>
+    <circle cx="94" cy="60" r="4" fill="#f472b6"/>
+  </g>
+
+  <!-- GRUB-style angled bracket to the right, echoing the boot menu chevron -->
+  <path d="M156 62 L188 96 L156 130" fill="none" stroke="url(#accent2)" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <text x="120" y="212" text-anchor="middle" font-family="'JetBrains Mono', 'Fira Code', monospace" font-size="22" font-weight="700" fill="#e9e4f7" letter-spacing="1">gifygrub</text>
+</svg>

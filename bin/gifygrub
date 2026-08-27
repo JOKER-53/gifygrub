@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 #
-# gifygrub — convert a GIF into an animated GRUB2 boot theme
+# gifygrub — turn a GIF into a static GRUB2 boot theme
+#
+# NOTE: GRUB2 has no native mechanism for cycling image frames as an
+# animation (verified against GRUB's C source — see lib/theme.sh for
+# details). gifygrub extracts frames from your GIF and lets you pick
+# one (or auto-picks the middle frame) as a static desktop-image theme.
 #
 set -euo pipefail
 
@@ -24,27 +29,35 @@ THEME_NAME=""
 FPS=5
 NO_INSTALL=0
 MAX_FPS=10
+FRAME_INDEX=""
 
 usage() {
     cat <<EOF
-gifygrub v${VERSION} — turn a GIF into a GRUB2 boot animation
+gifygrub v${VERSION} — turn a GIF into a static GRUB2 boot theme
 
 Usage:
-  gifygrub --input <file.gif> --theme <name> [--fps N] [--no-install]
+  gifygrub --input <file.gif> --theme <name> [--fps N] [--frame N] [--no-install]
   gifygrub --version
   gifygrub --help
 
 Options:
   --input FILE      Path to the source .gif file (required)
   --theme NAME       Name for the generated theme (required)
-  --fps N            Target frame rate, capped at ${MAX_FPS} (default: ${FPS})
+  --fps N            Frame extraction density, capped at ${MAX_FPS} (default: ${FPS}).
+                       Higher fps = more frames to choose from, not faster animation.
+  --frame N           Use frame N (1-indexed) as the background instead of the
+                       auto-picked middle frame. Run with --no-install first to
+                       preview extracted frames and pick one.
   --no-install       Generate frames + theme.txt only, skip installing to /boot/grub/
   --help              Show this help
   --version           Show version
 
-Notes:
-  GRUB's render loop cannot hit true video framerates. Requested fps above
-  ${MAX_FPS} will be capped with a warning. See README.md > Limitations.
+How it works:
+  GRUB2 has no native support for animating a sequence of images — this
+  was verified directly against GRUB's source. gifygrub extracts frames
+  from your GIF so you can pick the best-looking one as a static boot
+  background, rather than promising animation GRUB can't deliver.
+  See README.md > How it works.
 EOF
 }
 
@@ -66,6 +79,10 @@ while [[ $# -gt 0 ]]; do
         --no-install)
             NO_INSTALL=1
             shift
+            ;;
+        --frame)
+            FRAME_INDEX="${2:-}"
+            shift 2
             ;;
         --version)
             echo "gifygrub v${VERSION}"
@@ -106,9 +123,13 @@ if ! [[ "$FPS" =~ ^[0-9]+$ ]]; then
 fi
 
 if (( FPS > MAX_FPS )); then
-    echo "warning: requested fps (${FPS}) exceeds GRUB's realistic render ceiling." >&2
-    echo "warning: capping to ${MAX_FPS}fps. See README.md > Limitations." >&2
+    echo "warning: capping --fps to ${MAX_FPS} (higher only yields more candidate frames, not faster playback — GRUB shows a single static frame)." >&2
     FPS=$MAX_FPS
+fi
+
+if [[ -n "$FRAME_INDEX" ]] && ! [[ "$FRAME_INDEX" =~ ^[0-9]+$ ]]; then
+    echo "error: --frame must be a positive integer" >&2
+    exit 1
 fi
 
 # Sanitize theme name (alnum, dash, underscore only) — prevents path traversal
@@ -124,11 +145,23 @@ gifygrub::check_deps
 WORKDIR="$(mktemp -d "/tmp/gifygrub.XXXXXX")"
 trap 'rm -rf "$WORKDIR"' EXIT
 
-echo "==> Extracting frames from ${INPUT} (target ${FPS}fps)"
+echo "==> Extracting frames from ${INPUT}"
 gifygrub::extract_frames "$INPUT" "$WORKDIR" "$FPS"
 
-echo "==> Generating theme.txt for '${THEME_NAME}'"
-gifygrub::generate_theme "$WORKDIR" "$THEME_NAME" "$FPS"
+if [[ -n "$FRAME_INDEX" ]]; then
+    printf -v FRAME_NAME "frame_%04d.png" "$FRAME_INDEX"
+    SELECTED_FRAME="${WORKDIR}/${FRAME_NAME}"
+    if [[ ! -f "$SELECTED_FRAME" ]]; then
+        echo "error: frame ${FRAME_INDEX} not found (${FRAME_NAME} does not exist)" >&2
+        echo "       run with --no-install to see how many frames were extracted." >&2
+        exit 1
+    fi
+else
+    SELECTED_FRAME="$(gifygrub::pick_best_frame "$WORKDIR")"
+fi
+
+echo "==> Generating theme.txt for '${THEME_NAME}' (background: $(basename "$SELECTED_FRAME"))"
+gifygrub::generate_theme "$WORKDIR" "$THEME_NAME" "$SELECTED_FRAME"
 
 if [[ "$NO_INSTALL" -eq 1 ]]; then
     OUT_DIR="./${THEME_NAME}"

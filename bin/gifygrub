@@ -1,0 +1,144 @@
+#!/usr/bin/env bash
+#
+# gifygrub — convert a GIF into an animated GRUB2 boot theme
+#
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
+LIB_DIR="$(cd -- "${SCRIPT_DIR}/../lib" &> /dev/null && pwd)"
+
+# shellcheck source=../lib/deps.sh
+source "${LIB_DIR}/deps.sh"
+# shellcheck source=../lib/extract.sh
+source "${LIB_DIR}/extract.sh"
+# shellcheck source=../lib/theme.sh
+source "${LIB_DIR}/theme.sh"
+# shellcheck source=../lib/install.sh
+source "${LIB_DIR}/install.sh"
+
+VERSION="0.1.0"
+
+# ---- defaults ----
+INPUT=""
+THEME_NAME=""
+FPS=5
+NO_INSTALL=0
+MAX_FPS=10
+
+usage() {
+    cat <<EOF
+gifygrub v${VERSION} — turn a GIF into a GRUB2 boot animation
+
+Usage:
+  gifygrub --input <file.gif> --theme <name> [--fps N] [--no-install]
+  gifygrub --version
+  gifygrub --help
+
+Options:
+  --input FILE      Path to the source .gif file (required)
+  --theme NAME       Name for the generated theme (required)
+  --fps N            Target frame rate, capped at ${MAX_FPS} (default: ${FPS})
+  --no-install       Generate frames + theme.txt only, skip installing to /boot/grub/
+  --help              Show this help
+  --version           Show version
+
+Notes:
+  GRUB's render loop cannot hit true video framerates. Requested fps above
+  ${MAX_FPS} will be capped with a warning. See README.md > Limitations.
+EOF
+}
+
+# ---- arg parsing ----
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --input)
+            INPUT="${2:-}"
+            shift 2
+            ;;
+        --theme)
+            THEME_NAME="${2:-}"
+            shift 2
+            ;;
+        --fps)
+            FPS="${2:-}"
+            shift 2
+            ;;
+        --no-install)
+            NO_INSTALL=1
+            shift
+            ;;
+        --version)
+            echo "gifygrub v${VERSION}"
+            exit 0
+            ;;
+        --help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "error: unknown argument: $1" >&2
+            usage >&2
+            exit 1
+            ;;
+    esac
+done
+
+# ---- validation ----
+if [[ -z "$INPUT" || -z "$THEME_NAME" ]]; then
+    echo "error: --input and --theme are required" >&2
+    usage >&2
+    exit 1
+fi
+
+if [[ ! -f "$INPUT" ]]; then
+    echo "error: input file not found: $INPUT" >&2
+    exit 1
+fi
+
+if [[ ! "$INPUT" =~ \.gif$ ]]; then
+    echo "error: input file must be a .gif: $INPUT" >&2
+    exit 1
+fi
+
+if ! [[ "$FPS" =~ ^[0-9]+$ ]]; then
+    echo "error: --fps must be a positive integer" >&2
+    exit 1
+fi
+
+if (( FPS > MAX_FPS )); then
+    echo "warning: requested fps (${FPS}) exceeds GRUB's realistic render ceiling." >&2
+    echo "warning: capping to ${MAX_FPS}fps. See README.md > Limitations." >&2
+    FPS=$MAX_FPS
+fi
+
+# Sanitize theme name (alnum, dash, underscore only) — prevents path traversal
+# via a crafted --theme value reaching install paths under /boot/grub/themes/.
+if ! [[ "$THEME_NAME" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+    echo "error: --theme must contain only letters, numbers, - and _" >&2
+    exit 1
+fi
+
+# ---- pipeline ----
+gifygrub::check_deps
+
+WORKDIR="$(mktemp -d "/tmp/gifygrub.XXXXXX")"
+trap 'rm -rf "$WORKDIR"' EXIT
+
+echo "==> Extracting frames from ${INPUT} (target ${FPS}fps)"
+gifygrub::extract_frames "$INPUT" "$WORKDIR" "$FPS"
+
+echo "==> Generating theme.txt for '${THEME_NAME}'"
+gifygrub::generate_theme "$WORKDIR" "$THEME_NAME" "$FPS"
+
+if [[ "$NO_INSTALL" -eq 1 ]]; then
+    OUT_DIR="./${THEME_NAME}"
+    mkdir -p "$OUT_DIR"
+    cp -r "$WORKDIR"/* "$OUT_DIR"/
+    echo "==> --no-install set. Theme generated at: ${OUT_DIR}"
+    exit 0
+fi
+
+echo "==> Installing theme to /boot/grub/themes/${THEME_NAME}"
+gifygrub::install_theme "$WORKDIR" "$THEME_NAME"
+
+echo "==> Done. '${THEME_NAME}' installed and GRUB config updated."

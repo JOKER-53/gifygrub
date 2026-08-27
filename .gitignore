@@ -1,0 +1,11 @@
+# Test/generated output
+test_theme/
+*.gif
+*.mp4
+
+# Generated theme output (any --theme name used locally)
+/*.theme/
+
+# OS/editor cruft
+.DS_Store
+*.swp

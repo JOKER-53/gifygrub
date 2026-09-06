@@ -3,19 +3,17 @@
 # gifygrub — generate a static GRUB2 boot theme (background.png + theme.txt)
 # from a GIF.
 #
-# NOTE: GRUB2 has no native mechanism for cycling image frames as an
-# animation (verified against GRUB's C source — see lib/theme.sh for
-# details). gifygrub extracts frames from your GIF and lets you pick
-# one (or auto-picks the middle frame) as a static desktop-image theme.
-#
-# gifygrub does NOT install themes or touch /boot/grub/ — it only
-# generates a theme folder (background.png + theme.txt) matching the
-# grub-themes convention. Use grub-themes' install.sh to install it.
-#
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
-LIB_DIR="$(cd -- "${SCRIPT_DIR}/../lib" &> /dev/null && pwd)"
+if [[ -d "${SCRIPT_DIR}/../lib" ]]; then
+    LIB_DIR="$(cd -- "${SCRIPT_DIR}/../lib" &> /dev/null && pwd)"
+elif [[ -d "/usr/local/lib/gifygrub" ]]; then
+    LIB_DIR="/usr/local/lib/gifygrub"
+else
+    echo "error: could not find lib directory" >&2
+    exit 1
+fi
 
 # shellcheck source=../lib/deps.sh
 source "${LIB_DIR}/deps.sh"
@@ -24,53 +22,43 @@ source "${LIB_DIR}/extract.sh"
 # shellcheck source=../lib/theme.sh
 source "${LIB_DIR}/theme.sh"
 
-VERSION="0.1.0"
+VERSION="0.2.0"
 
-# ---- defaults ----
 INPUT=""
 THEME_NAME=""
-FPS=5
-MAX_FPS=10
 FRAME_INDEX=""
 OUTPUT_DIR=""
+RESOLUTION=""
 
 usage() {
     cat <<EOF
 gifygrub v${VERSION} — generate a static GRUB2 theme from a GIF
 
 Usage:
-  gifygrub --input <file.gif> --theme <name> [--fps N] [--frame N] [--output DIR]
+  gifygrub --input <file.gif> --theme <name> [--frame N] [--resolution WxH] [--output DIR]
   gifygrub --version
   gifygrub --help
 
 Options:
-  --input FILE     Path to the source .gif file (required)
-  --theme NAME      Name for the generated theme (required)
-  --fps N           Frame extraction density, capped at ${MAX_FPS} (default: ${FPS}).
-                      Higher fps = more frames to choose from, not faster playback.
+  --input FILE       Path to the source .gif file (required)
+  --theme NAME       Name for the generated theme (required)
   --frame N          Use frame N (1-indexed) as the background instead of the
-                      auto-picked middle frame. Run once without --frame first
-                      to see how many frames were extracted, then re-run.
+                     auto-picked middle frame.
+  --resolution WxH   Target resolution (e.g., 1920x1080). If omitted, the GIF's
+                     original resolution is used.
   --output DIR       Directory to write the theme folder into (default: ./<theme>)
-                      Point this at grub-themes/<slug>/ to drop straight into
-                      a grub-themes checkout.
   --help             Show this help
   --version          Show version
 
 How it works:
-  GRUB2 has no native support for animating a sequence of images — this
-  was verified directly against GRUB's source. gifygrub extracts frames
-  from your GIF so you can pick the best-looking one as a static boot
-  background, rather than promising animation GRUB can't deliver.
+  GRUB2 has no native support for animating a sequence of images. gifygrub
+  extracts a single frame from your GIF to use as a static boot background.
 
   gifygrub only GENERATES a theme folder (background.png + theme.txt) —
-  it does not install to /boot/grub/ or touch your GRUB config. Use
-  grub-themes' install.sh (or your own theme manager) to install the
-  output. See README.md > How it works.
+  it does not install to /boot/grub/ or touch your GRUB config.
 EOF
 }
 
-# ---- arg parsing ----
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --input)
@@ -81,17 +69,25 @@ while [[ $# -gt 0 ]]; do
             THEME_NAME="${2:-}"
             shift 2
             ;;
-        --fps)
-            FPS="${2:-}"
-            shift 2
-            ;;
         --frame)
             FRAME_INDEX="${2:-}"
+            shift 2
+            ;;
+        --resolution)
+            RESOLUTION="${2:-}"
             shift 2
             ;;
         --output)
             OUTPUT_DIR="${2:-}"
             shift 2
+            ;;
+        --fps)
+            echo "warning: --fps is ignored in v0.2.0+ (gifygrub extracts a single static frame)" >&2
+            shift 2
+            ;;
+        --no-install)
+            echo "warning: --no-install is ignored (gifygrub no longer attempts installation)" >&2
+            shift 1
             ;;
         --version)
             echo "gifygrub v${VERSION}"
@@ -109,7 +105,6 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# ---- validation ----
 if [[ -z "$INPUT" || -z "$THEME_NAME" ]]; then
     echo "error: --input and --theme are required" >&2
     usage >&2
@@ -126,23 +121,16 @@ if [[ ! "$INPUT" =~ \.gif$ ]]; then
     exit 1
 fi
 
-if ! [[ "$FPS" =~ ^[0-9]+$ ]]; then
-    echo "error: --fps must be a positive integer" >&2
-    exit 1
-fi
-
-if (( FPS > MAX_FPS )); then
-    echo "warning: capping --fps to ${MAX_FPS} (higher only yields more candidate frames, not faster playback — GRUB shows a single static frame)." >&2
-    FPS=$MAX_FPS
-fi
-
 if [[ -n "$FRAME_INDEX" ]] && ! [[ "$FRAME_INDEX" =~ ^[0-9]+$ ]]; then
     echo "error: --frame must be a positive integer" >&2
     exit 1
 fi
 
-# Sanitize theme name (alnum, dash, underscore only) — this becomes a
-# folder/slug name, so keep it filesystem- and URL-safe.
+if [[ -n "$RESOLUTION" ]] && ! [[ "$RESOLUTION" =~ ^[0-9]+x[0-9]+$ ]]; then
+    echo "error: --resolution must be in format WxH (e.g. 1920x1080)" >&2
+    exit 1
+fi
+
 if ! [[ "$THEME_NAME" =~ ^[a-zA-Z0-9_-]+$ ]]; then
     echo "error: --theme must contain only letters, numbers, - and _" >&2
     exit 1
@@ -152,33 +140,35 @@ if [[ -z "$OUTPUT_DIR" ]]; then
     OUTPUT_DIR="./${THEME_NAME}"
 fi
 
-# ---- pipeline ----
 gifygrub::check_deps
 
 WORKDIR="$(mktemp -d "/tmp/gifygrub.XXXXXX")"
 trap 'rm -rf "$WORKDIR"' EXIT
 
-echo "==> Extracting frames from ${INPUT}"
-gifygrub::extract_frames "$INPUT" "$WORKDIR" "$FPS"
+TOTAL_FRAMES=$(gifygrub::get_frame_count "$INPUT")
+echo "==> Source GIF has ${TOTAL_FRAMES} frames."
 
-if [[ -n "$FRAME_INDEX" ]]; then
-    printf -v FRAME_NAME "frame_%04d.png" "$FRAME_INDEX"
-    SELECTED_FRAME="${WORKDIR}/${FRAME_NAME}"
-    if [[ ! -f "$SELECTED_FRAME" ]]; then
-        echo "error: frame ${FRAME_INDEX} not found (${FRAME_NAME} does not exist)" >&2
-        echo "       re-run without --frame to see how many frames were extracted." >&2
+if [[ -z "$FRAME_INDEX" ]]; then
+    FRAME_INDEX=$(( TOTAL_FRAMES / 2 ))
+    if (( FRAME_INDEX < 1 )); then FRAME_INDEX=1; fi
+    echo "==> Auto-selected middle frame: ${FRAME_INDEX}"
+else
+    if (( FRAME_INDEX > TOTAL_FRAMES || FRAME_INDEX < 1 )); then
+        echo "error: requested frame ${FRAME_INDEX} is out of bounds (1-${TOTAL_FRAMES})" >&2
         exit 1
     fi
-else
-    SELECTED_FRAME="$(gifygrub::pick_best_frame "$WORKDIR")"
+    echo "==> Using requested frame: ${FRAME_INDEX}"
 fi
 
-echo "==> Generating theme '${THEME_NAME}' (background: $(basename "$SELECTED_FRAME"))"
-gifygrub::generate_theme "$WORKDIR" "$THEME_NAME" "$SELECTED_FRAME"
+echo "==> Extracting frame ${FRAME_INDEX} from ${INPUT}"
+gifygrub::extract_frame "$INPUT" "$WORKDIR" "$FRAME_INDEX" "$RESOLUTION"
+
+echo "==> Generating theme '${THEME_NAME}'"
+gifygrub::generate_theme "$WORKDIR" "$THEME_NAME"
 
 mkdir -p "$OUTPUT_DIR"
 cp "${WORKDIR}/background.png" "$OUTPUT_DIR"/
 cp "${WORKDIR}/theme.txt" "$OUTPUT_DIR"/
 
 echo "==> Done. Theme generated at: ${OUTPUT_DIR}"
-echo "    (background.png + theme.txt — install with grub-themes' install.sh, or your own theme manager)"
+echo "    (background.png + theme.txt — install with your theme manager)"

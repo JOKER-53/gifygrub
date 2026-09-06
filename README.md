@@ -3,7 +3,7 @@
 
   # gifygrub
 
-  **Turn any GIF into an animated GRUB2 boot theme — no manual frame slicing.**
+  **Turn any GIF into a static GRUB2 boot theme.**
 
   [![License: MIT](https://img.shields.io/badge/License-MIT-a78bfa.svg)](LICENSE.md)
   [![Made for GRUB2](https://img.shields.io/badge/GRUB2-boot--theme-38bdf8.svg)](https://www.gnu.org/software/grub/)
@@ -14,62 +14,57 @@
 
 ## What is gifygrub?
 
-GRUB2 has no native GIF or video decoder — it can only display a sequence of static images. Getting a "boot animation" today means manually extracting frames, writing raw `theme.txt` image blocks, and hand-tuning delays.
+GRUB2 has no native GIF or video decoder — it can only display a sequence of static images, and lacks support for actual frame animation. Getting a custom boot background from a GIF usually means manually extracting frames and selecting the best one.
 
 **gifygrub automates all of that.** Point it at a `.gif`, and it:
 
-1. Checks for `ffmpeg` / `imagemagick`
-2. Extracts the GIF into sequential `frame_*.png` assets
-3. Computes a GRUB-realistic frame delay (GRUB's render loop can't hit true video framerates — gifygrub caps and warns accordingly)
-4. Generates the `+ image { file = "frame_*.png" }` block in `theme.txt`
-5. Installs the theme to `/boot/grub/themes/` and runs `update-grub`
+1. Checks for `ffmpeg` or `imagemagick`
+2. Automatically determines the frame count and selects a target frame (the middle frame by default).
+3. Extracts and optionally scales that single frame to create a `background.png`.
+4. Generates a GRUB-compatible `theme.txt` configuration.
 
 ```bash
-gifygrub --input custom_cyberpunk.gif --theme cyber_neon --fps 8
+gifygrub --input custom_cyberpunk.gif --theme cyber_neon --resolution 1920x1080
 ```
 
-That's it — one command, animated boot screen.
+That's it — one command, static boot screen generated.
 
 ## Why it exists
 
-This project is the tooling companion to [grub-themes](https://github.com/KADHIRAVANEG/grub-themes), a GRUB2 theme collection. Building themes by hand kept hitting the same wall: turning a GIF into GRUB-compatible frames is tedious and error-prone. gifygrub exists so nobody has to do that by hand again.
+This project is the tooling companion to [grub-themes](https://github.com/KADHIRAVANEG/grub-themes), a GRUB2 theme collection. Building themes by hand kept hitting the same wall: picking frames and generating configuration is tedious. gifygrub exists so nobody has to do that by hand again.
 
 ## Requirements
 
-- Linux with GRUB2 (tested on CachyOS)
-- `ffmpeg` or `imagemagick`
-- Root/sudo access for the install step (writes to `/boot/grub/`)
+- Linux with GRUB2
+- `ffmpeg` + `ffprobe` (preferred) or `imagemagick`
+- Root/sudo access for the install step
 
 ## Installation
 
 ```bash
 git clone https://github.com/KADHIRAVANEG/gifygrub.git
 cd gifygrub
-./install.sh
+sudo ./install.sh
 ```
 
 ## Usage
 
 ```bash
-gifygrub --input <path-to-gif> --theme <theme-name> [--fps N] [--no-install]
+gifygrub --input <path-to-gif> --theme <theme-name> [--frame N] [--resolution WxH]
 ```
 
-| Flag | Description | Default |
-|---|---|---|
-| `--input` | Path to the source `.gif` | required |
-| `--theme` | Name for the generated theme | required |
-| `--fps` | Target frame rate (capped ~5–10fps — see [Limitations](#limitations)) | `5` |
-| `--no-install` | Generate frames + `theme.txt` without installing to `/boot/grub/` | off |
+| Flag | Description |
+|---|---|
+| `--input` | Path to the source `.gif` (required) |
+| `--theme` | Name for the generated theme (required) |
+| `--frame` | Use frame N (1-indexed) as the background instead of the auto-picked middle frame |
+| `--resolution` | Target resolution (e.g., 1920x1080). If omitted, the GIF's original resolution is used |
 
 ## Limitations
 
-GRUB's `gfxmenu` render loop is not a real animation timer — it's tied to the boot countdown tick, not a video-style frame clock. This means:
-
-- True 30fps playback is **not achievable**; gifygrub caps suggested fps and warns above realistic thresholds
-- Every frame is stored as an uncompressed PNG in the boot partition — long/high-fps clips bloat the ESP fast
-- Results are a **flipbook effect**, not smooth video
-
-See [the project wiki](../../wiki) for details on how GRUB's frame-cycling actually works under the hood.
+GRUB's `gfxmenu` render loop is not a real animation timer — it's tied to the boot countdown tick. 
+- True 30fps playback is **not achievable**.
+- gifygrub generates a **static background** from the GIF rather than attempting to trick GRUB into a flipbook effect, which bloats the boot partition.
 
 ## Related project
 

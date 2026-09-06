@@ -1,101 +1,102 @@
 #!/usr/bin/env bash
-# gifygrub::extract_frames INPUT_GIF WORKDIR FPS
+# gifygrub::extract_frame INPUT_GIF WORKDIR FRAME_INDEX RESOLUTION
 #
-# Extracts INPUT_GIF into sequential frame_*.png files inside WORKDIR,
-# using whichever backend gifygrub::check_deps selected (GIFYGRUB_BACKEND).
+# Extracts a single frame from INPUT_GIF into WORKDIR/background.png.
 
-gifygrub::extract_frames() {
+gifygrub::get_frame_count() {
     local input="$1"
-    local workdir="$2"
-    local fps="$3"
+    local count=0
 
     case "$GIFYGRUB_BACKEND" in
         ffmpeg)
-            gifygrub::_extract_ffmpeg "$input" "$workdir" "$fps"
+            # -count_packets is fast, but sometimes nb_read_packets fails if stream has no index.
+            count=$(ffprobe -v error -select_streams v:0 -count_packets -show_entries stream=nb_read_packets -of csv=p=0 "$input" | tr -d '\r\n')
+            if [[ -z "$count" || "$count" == "N/A" ]]; then
+                # Fallback to slower frame counting
+                count=$(ffprobe -v error -count_frames -select_streams v:0 -show_entries stream=nb_read_frames -of default=nokey=1:noprint_wrappers=1 "$input" | tr -d '\r\n')
+            fi
             ;;
         imagemagick)
-            gifygrub::_extract_imagemagick "$input" "$workdir" "$fps"
-            ;;
-        *)
-            echo "error: no extraction backend selected (call gifygrub::check_deps first)" >&2
-            exit 1
+            count=$($IMAGEMAGICK_IDENTIFY -format "%n\n" "$input" | head -n1)
             ;;
     esac
 
-    local frame_count
-    frame_count="$(find "$workdir" -maxdepth 1 -name 'frame_*.png' | wc -l)"
+    if ! [[ "$count" =~ ^[0-9]+$ ]] || (( count == 0 )); then
+        echo "error: could not determine frame count of $input" >&2
+        exit 1
+    fi
+    echo "$count"
+}
 
-    if (( frame_count == 0 )); then
-        echo "error: frame extraction produced 0 frames" >&2
+gifygrub::extract_frame() {
+    local input="$1"
+    local workdir="$2"
+    local frame_index="$3"
+    local resolution="$4"
+
+    local output="${workdir}/background.png"
+
+    case "$GIFYGRUB_BACKEND" in
+        ffmpeg)
+            gifygrub::_extract_ffmpeg "$input" "$output" "$frame_index" "$resolution"
+            ;;
+        imagemagick)
+            gifygrub::_extract_imagemagick "$input" "$output" "$frame_index" "$resolution"
+            ;;
+    esac
+
+    if [[ ! -f "$output" ]]; then
+        echo "error: frame extraction failed" >&2
         exit 1
     fi
 
-    local total_size
-    total_size="$(du -sh "$workdir" 2>/dev/null | cut -f1)"
-
-    echo "    extracted ${frame_count} frames (backend: ${GIFYGRUB_BACKEND}, ~${total_size} total)"
-
-    # 20MB is a rough soft ceiling — many ESPs are small, and a single
-    # theme eating a large chunk of it is worth flagging loudly.
     local size_kb
-    size_kb="$(du -sk "$workdir" 2>/dev/null | cut -f1)"
+    size_kb="$(du -sk "$output" 2>/dev/null | cut -f1)"
+    echo "    extracted frame ${frame_index} (backend: ${GIFYGRUB_BACKEND}, ~${size_kb}KB)"
+
     if (( size_kb > 20480 )); then
-        echo "warning: generated theme is ~${total_size} — this may be too large for a small ESP/boot partition." >&2
-        echo "warning: consider a lower --fps or a shorter/lower-res source GIF." >&2
+        echo "warning: generated theme background is ~${size_kb}KB — this may be too large for a small ESP/boot partition." >&2
     fi
 }
 
 gifygrub::_extract_ffmpeg() {
     local input="$1"
-    local workdir="$2"
-    local fps="$3"
+    local output="$2"
+    local frame_index="$3"
+    local resolution="$4"
 
-    # Cap width at 640px — GRUB renders at boot-screen resolution, not
-    # desktop resolution, so source-quality frames are wasted space.
-    # format=pal8 quantizes to an 8-bit palette (matches the GIF's own
-    # native color depth) which compresses far better than 24-bit PNG
-    # for gradient/photographic content.
+    # Scale filter part. If resolution is empty, no scaling.
+    local vf_scale=""
+    if [[ -n "$resolution" ]]; then
+        local res_colon="${resolution/x/:}"
+        vf_scale="scale=${res_colon}:force_original_aspect_ratio=decrease,pad=${res_colon}:(ow-iw)/2:(oh-ih)/2,"
+    fi
+    # Use select filter to get the exact frame. ffmpeg indices are 0-based.
+    # We expect frame_index to be 1-based from the user logic, so subtract 1.
+    local ffmpeg_idx=$(( frame_index - 1 ))
+    
     ffmpeg -v error -y \
         -i "$input" \
-        -vf "fps=${fps},scale='min(640,iw)':-2,format=pal8" \
+        -vf "${vf_scale}select='eq(n\,${ffmpeg_idx})',format=pal8" \
+        -vframes 1 \
         -compression_level 9 \
-        "${workdir}/frame_%04d.png"
+        "$output"
 }
 
 gifygrub::_extract_imagemagick() {
     local input="$1"
-    local workdir="$2"
-    local fps="$3"
+    local output="$2"
+    local frame_index="$3"
+    local resolution="$4"
 
-    # imagemagick's `convert` extracts every native GIF frame; it doesn't
-    # resample to a target fps the way ffmpeg does, so we extract natively
-    # then thin the frame set down to approximate the requested fps.
-    # Cap width at 640px and quantize to 256 colors for the same
-    # boot-partition-size reasons as the ffmpeg path above.
-    convert "$input" -resize '640x>' -colors 256 "${workdir}/raw_%04d.png"
-
-    local native_count
-    native_count="$(find "$workdir" -maxdepth 1 -name 'raw_*.png' | wc -l)"
-
-    # Assume a typical GIF plays at ~10fps natively; keep every Nth frame
-    # to approximate the requested fps without needing to parse per-frame
-    # delay values here.
-    local native_fps=10
-    local step=$(( native_fps / fps ))
-    (( step < 1 )) && step=1
-
-    local i=0
-    local out_index=1
-    for f in "${workdir}"/raw_*.png; do
-        if (( i % step == 0 )); then
-            printf -v out_name "frame_%04d.png" "$out_index"
-            mv "$f" "${workdir}/${out_name}"
-            (( out_index++ ))
-        else
-            rm -f "$f"
-        fi
-        (( i++ ))
-    done
-
-    (void=$native_count) # native_count only used for the thinning ratio above
+    local im_idx=$(( frame_index - 1 ))
+    local cmd=( $IMAGEMAGICK_CMD "${input}[${im_idx}]" )
+    
+    if [[ -n "$resolution" ]]; then
+        cmd+=( -resize "${resolution}>" -background black -gravity center -extent "$resolution" )
+    fi
+    
+    cmd+=( -colors 256 "$output" )
+    
+    "${cmd[@]}"
 }

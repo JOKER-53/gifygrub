@@ -18,7 +18,7 @@ gifygrub writes to `/boot/grub/` and runs `update-grub`, which affects whether a
 
 Instead:
 1. Open a [GitHub Security Advisory](../../security/advisories/new) on this repo (private to maintainers), **or**
-2. If that's unavailable, contact the maintainer directly via the profile linked on the [KADHIRAVANEG GitHub profile](https://github.com/KADHIRAVANEG)
+2. If that's unavailable, contact the maintainer directly via the profile linked on the [KADHIRAVANEG GitHub profile](https://github.com/JOKER-53)
 
 Please include:
 - A clear description of the vulnerability

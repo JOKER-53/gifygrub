@@ -31,7 +31,7 @@ That's it — one command, static boot screen generated.
 
 ## Why it exists
 
-This project is the tooling companion to [grub-themes](https://github.com/KADHIRAVANEG/grub-themes), a GRUB2 theme collection. Building themes by hand kept hitting the same wall: picking frames and generating configuration is tedious. gifygrub exists so nobody has to do that by hand again.
+This project is the tooling companion to [grub-themes](https://github.com/JOKER-53/grub-themes), a GRUB2 theme collection. Building themes by hand kept hitting the same wall: picking frames and generating configuration is tedious. gifygrub exists so nobody has to do that by hand again.
 
 ## Requirements
 
@@ -42,7 +42,7 @@ This project is the tooling companion to [grub-themes](https://github.com/KADHIR
 ## Installation
 
 ```bash
-git clone https://github.com/KADHIRAVANEG/gifygrub.git
+git clone https://github.com/JOKER-53/gifygrub.git
 cd gifygrub
 sudo ./install.sh
 ```
@@ -68,7 +68,7 @@ GRUB's `gfxmenu` render loop is not a real animation timer — it's tied to the 
 
 ## Related project
 
-[grub-themes](https://github.com/KADHIRAVANEG/grub-themes) — a curated GRUB2 theme collection. Themes generated with gifygrub are welcome as submissions there.
+[grub-themes](https://github.com/JOKER-53/grub-themes) — a curated GRUB2 theme collection. Themes generated with gifygrub are welcome as submissions there.
 
 ## Contributing
 
